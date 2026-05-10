@@ -2,6 +2,7 @@ import argparse
 from collections.abc import Sequence
 
 from quant.data import download_data
+from quant.preprocess import preprocess_data
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -12,6 +13,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     download_parser.add_argument("--config", default="config.yaml")
     download_parser.add_argument("--adjust", default="qfq")
 
+    preprocess_parser = subparsers.add_parser("preprocess-data")
+    preprocess_parser.add_argument("--config", default="config.yaml")
+
     args = parser.parse_args(argv)
     if args.command == "download-data":
         paths = download_data(
@@ -20,4 +24,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for name, path in paths.items():
             print(f"{name}: {path}")
+    elif args.command == "preprocess-data":
+        path = preprocess_data(config_path=args.config)
+        print(f"clean_panel: {path}")
     return 0

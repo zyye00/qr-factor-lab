@@ -47,6 +47,24 @@ data/processed/stock_panel.parquet
 data/processed/benchmark_000905.parquet
 ```
 
+## Preprocess
+
+After downloading data, build the cleaned panel with basic returns:
+
+```bash
+quant preprocess-data
+```
+
+Output:
+
+```text
+data/processed/clean_panel.parquet
+```
+
+The cleaned panel removes duplicate `date` + `ticker` rows, rows with missing
+or non-positive `close`, and rows with `volume <= 0`. It adds `ret_1d`,
+`ret_5d`, and `ret_20d`.
+
 ## Checks
 
 ```bash
