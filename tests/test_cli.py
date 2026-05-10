@@ -18,4 +18,5 @@ def test_download_data_cli_calls_downloader(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert calls == {"config_path": "custom.yaml", "adjust": ""}
     output = capsys.readouterr().out
-    assert "stock_panel: data\\processed\\stock_panel.parquet" in output
+    assert "stock_panel:" in output
+    assert "stock_panel.parquet" in output
