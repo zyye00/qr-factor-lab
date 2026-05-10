@@ -1,1 +1,17 @@
 *.pyc
+__pycache__/
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
+
+reports/figures/*
+!reports/figures/.gitkeep
+
+/.vscode/

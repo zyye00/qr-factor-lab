@@ -1,8 +1,8 @@
 # CSI500 Factor Lab
 
 A small, reproducible research project for CSI 500 cross-sectional factor
-analysis. The first milestone only establishes the project skeleton, shared
-configuration, linting, and a smoke test.
+analysis. The current implementation can download the current CSI 500 universe,
+stock OHLCV data, and benchmark OHLCV data to parquet files.
 
 ## Scope
 
@@ -21,14 +21,30 @@ This project will gradually build:
 ```text
 config.yaml
 pyproject.toml
-src/csi500_factor_lab/
+src/quant/
 tests/
 ```
 
-## Setup
+## Data Download
+
+Install the project in editable mode first:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
+
+Then run the installed CLI:
+
+```bash
+quant download-data
+```
+
+Outputs:
+
+```text
+data/raw/csi500_universe.parquet
+data/processed/stock_panel.parquet
+data/processed/benchmark_000905.parquet
 ```
 
 ## Checks
@@ -37,6 +53,18 @@ python -m pip install -e ".[dev]"
 ruff check .
 pytest
 ```
+
+## CI
+
+GitHub Actions runs the same checks on pushes and pull requests to `main`:
+
+```bash
+ruff check .
+pytest
+```
+
+The CI does not download market data, so external data-source outages do not
+block code checks.
 
 ## Notes
 
