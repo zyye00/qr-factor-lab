@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from quant.data import download_data
 from quant.factors import compute_factors
 from quant.labels import compute_labels
+from quant.metrics import compute_ic_analysis
 from quant.preprocess import preprocess_data
 
 
@@ -29,6 +30,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     labels_parser = subparsers.add_parser("compute-labels")
     labels_parser.add_argument("--config", default="config.yaml")
 
+    ic_parser = subparsers.add_parser("compute-ic")
+    ic_parser.add_argument("--config", default="config.yaml")
+
     args = parser.parse_args(argv)
     if args.command == "download-data":
         paths = download_data(config_path=args.config)
@@ -43,3 +47,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     elif args.command == "compute-labels":
         path = compute_labels(config_path=args.config)
         print(f"label_panel: {path}")
+    elif args.command == "compute-ic":
+        paths = compute_ic_analysis(config_path=args.config)
+        for name, path in paths.items():
+            print(f"{name}: {path}")

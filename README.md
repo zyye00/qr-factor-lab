@@ -102,6 +102,28 @@ the same `date` + `ticker` row as the factor observation. Tail rows without a
 full forward horizon are kept as `NaN` so downstream evaluation can drop them
 explicitly.
 
+## IC Analysis
+
+After computing factors and labels, evaluate factor predictive power with IC and
+Rank IC:
+
+```bash
+quant compute-ic
+```
+
+Outputs:
+
+```text
+data/processed/ic_panel.parquet
+data/processed/rank_ic_panel.parquet
+data/processed/rolling_ic.parquet
+data/processed/ic_summary.csv
+```
+
+IC is the daily cross-sectional Pearson correlation between a factor and a
+forward-return label. Rank IC uses Spearman correlation on the same aligned
+factor-label pairs.
+
 ## Checks
 
 ```bash

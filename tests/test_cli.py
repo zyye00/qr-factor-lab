@@ -69,3 +69,20 @@ def test_compute_labels_cli_calls_label_builder(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
     assert "label_panel:" in output
     assert "label_panel.parquet" in output
+
+
+def test_compute_ic_cli_calls_metric_builder(monkeypatch, capsys) -> None:
+    calls = {}
+
+    def fake_compute_ic_analysis(config_path: str) -> dict[str, Path]:
+        calls["config_path"] = config_path
+        return {"ic_panel": Path("data/processed/ic_panel.parquet")}
+
+    monkeypatch.setattr(cli, "compute_ic_analysis", fake_compute_ic_analysis)
+
+    cli.main(["compute-ic", "--config", "custom.yaml"])
+
+    assert calls == {"config_path": "custom.yaml"}
+    output = capsys.readouterr().out
+    assert "ic_panel:" in output
+    assert "ic_panel.parquet" in output
