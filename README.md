@@ -118,6 +118,8 @@ data/processed/ic_panel.parquet
 data/processed/rank_ic_panel.parquet
 data/processed/rolling_ic.parquet
 data/processed/ic_summary.csv
+reports/ic_summary.md
+reports/figures/rolling_ic.png
 ```
 
 IC is the daily cross-sectional Pearson correlation between a factor and a
