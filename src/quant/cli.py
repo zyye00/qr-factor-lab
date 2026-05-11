@@ -1,4 +1,5 @@
 import argparse
+import logging
 from collections.abc import Sequence
 
 from quant.data import download_data
@@ -8,12 +9,16 @@ from quant.preprocess import preprocess_data
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     parser = argparse.ArgumentParser(prog="quant")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     download_parser = subparsers.add_parser("download-data")
     download_parser.add_argument("--config", default="config.yaml")
-    download_parser.add_argument("--adjust", default="qfq")
 
     preprocess_parser = subparsers.add_parser("preprocess-data")
     preprocess_parser.add_argument("--config", default="config.yaml")
@@ -26,10 +31,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     if args.command == "download-data":
-        paths = download_data(
-            config_path=args.config,
-            adjust=args.adjust,
-        )
+        paths = download_data(config_path=args.config)
         for name, path in paths.items():
             print(f"{name}: {path}")
     elif args.command == "preprocess-data":

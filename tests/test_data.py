@@ -1,7 +1,12 @@
 import pandas as pd
 
+from quant import data
 from quant.data import (
+    DOWNLOAD_LOG_NAME,
     OHLCV_COLUMNS,
+    STOCK_ADJUST,
+    configure_download_file_logging,
+    fetch_stock_ohlcv,
     make_price_panel,
     normalize_ohlcv,
     normalize_universe,
@@ -69,3 +74,83 @@ def test_save_parquet_preserves_panel_index(tmp_path) -> None:
 
     assert restored.index.names == ["date", "ticker"]
     assert list(restored.columns) == OHLCV_COLUMNS
+
+
+def test_fetch_stock_ohlcv_always_uses_hfq_adjust(monkeypatch) -> None:
+    calls = {}
+
+    def fake_stock_zh_a_daily(
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        adjust: str,
+    ) -> pd.DataFrame:
+        calls["symbol"] = symbol
+        calls["adjust"] = adjust
+        return pd.DataFrame(
+            {
+                "date": ["2024-01-02"],
+                "open": [10.0],
+                "high": [11.0],
+                "low": [9.8],
+                "close": [10.2],
+                "volume": [1000],
+                "amount": [10200.0],
+                "turnover": [0.5],
+            }
+        )
+
+    monkeypatch.setattr(data.ak, "stock_zh_a_daily", fake_stock_zh_a_daily)
+
+    fetch_stock_ohlcv("000001", "20240101", "20240131")
+
+    assert calls == {"symbol": "sz000001", "adjust": STOCK_ADJUST}
+
+
+def test_fetch_many_stocks_logs_download_failures(monkeypatch, caplog) -> None:
+    def fake_fetch_stock_ohlcv(
+        ticker: str,
+        start_date: str,
+        end_date: str,
+    ) -> pd.DataFrame:
+        if ticker == "000002":
+            raise RuntimeError("network timeout")
+        return pd.DataFrame(
+            {
+                "date": [pd.Timestamp("2024-01-02")],
+                "ticker": [ticker],
+                "open": [10.0],
+                "high": [11.0],
+                "low": [9.8],
+                "close": [10.2],
+                "volume": [1000],
+                "amount": [10200.0],
+                "turnover": [0.5],
+            }
+        )
+
+    monkeypatch.setattr(data, "fetch_stock_ohlcv", fake_fetch_stock_ohlcv)
+
+    with caplog.at_level("WARNING", logger="quant.data"):
+        frames = data._fetch_many_stocks(["000001", "000002"], "20240101", "20240131")
+
+    assert len(frames) == 1
+    assert "Failed to download stock OHLCV for 000002" in caplog.text
+    assert "Skipped 1 failed ticker(s): 000002" in caplog.text
+
+
+def test_configure_download_file_logging_writes_to_raw_dir(tmp_path) -> None:
+    log_path = configure_download_file_logging(tmp_path)
+
+    data.LOGGER.info("sample download message")
+    _close_download_file_handlers()
+
+    assert log_path == tmp_path / DOWNLOAD_LOG_NAME
+    assert "sample download message" in log_path.read_text(encoding="utf-8")
+
+
+def _close_download_file_handlers() -> None:
+    for handler in list(data.LOGGER.handlers):
+        if getattr(handler, "_qr_download_file_handler", False):
+            data.LOGGER.removeHandler(handler)
+            handler.close()

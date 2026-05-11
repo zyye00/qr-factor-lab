@@ -6,16 +6,15 @@ from quant import cli
 def test_download_data_cli_calls_downloader(monkeypatch, capsys) -> None:
     calls = {}
 
-    def fake_download_data(config_path: str, adjust: str) -> dict[str, Path]:
+    def fake_download_data(config_path: str) -> dict[str, Path]:
         calls["config_path"] = config_path
-        calls["adjust"] = adjust
         return {"stock_panel": Path("data/processed/stock_panel.parquet")}
 
     monkeypatch.setattr(cli, "download_data", fake_download_data)
 
-    cli.main(["download-data", "--config", "custom.yaml", "--adjust", ""])
+    cli.main(["download-data", "--config", "custom.yaml"])
 
-    assert calls == {"config_path": "custom.yaml", "adjust": ""}
+    assert calls == {"config_path": "custom.yaml"}
     output = capsys.readouterr().out
     assert "stock_panel:" in output
     assert "stock_panel.parquet" in output
