@@ -2,6 +2,7 @@ import argparse
 import logging
 from collections.abc import Sequence
 
+from quant.backtest import compute_quantile_backtest
 from quant.data import download_data
 from quant.factors import compute_factors
 from quant.labels import compute_labels
@@ -33,6 +34,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     ic_parser = subparsers.add_parser("compute-ic")
     ic_parser.add_argument("--config", default="config.yaml")
 
+    backtest_parser = subparsers.add_parser("run-backtest")
+    backtest_parser.add_argument("--config", default="config.yaml")
+
     args = parser.parse_args(argv)
     if args.command == "download-data":
         paths = download_data(config_path=args.config)
@@ -49,5 +53,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"label_panel: {path}")
     elif args.command == "compute-ic":
         paths = compute_ic_analysis(config_path=args.config)
+        for name, path in paths.items():
+            print(f"{name}: {path}")
+    elif args.command == "run-backtest":
+        paths = compute_quantile_backtest(config_path=args.config)
         for name, path in paths.items():
             print(f"{name}: {path}")

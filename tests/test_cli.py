@@ -86,3 +86,24 @@ def test_compute_ic_cli_calls_metric_builder(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
     assert "ic_panel:" in output
     assert "ic_panel.parquet" in output
+
+
+def test_run_backtest_cli_calls_backtest_builder(monkeypatch, capsys) -> None:
+    calls = {}
+
+    def fake_compute_quantile_backtest(config_path: str) -> dict[str, Path]:
+        calls["config_path"] = config_path
+        return {"quantile_returns": Path("data/processed/quantile_returns.parquet")}
+
+    monkeypatch.setattr(
+        cli,
+        "compute_quantile_backtest",
+        fake_compute_quantile_backtest,
+    )
+
+    cli.main(["run-backtest", "--config", "custom.yaml"])
+
+    assert calls == {"config_path": "custom.yaml"}
+    output = capsys.readouterr().out
+    assert "quantile_returns:" in output
+    assert "quantile_returns.parquet" in output

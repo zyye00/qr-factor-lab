@@ -126,6 +126,28 @@ IC is the daily cross-sectional Pearson correlation between a factor and a
 forward-return label. Rank IC uses Spearman correlation on the same aligned
 factor-label pairs.
 
+## Quantile Backtest
+
+After computing factors and labels, run the simple quantile backtest:
+
+```bash
+quant run-backtest
+```
+
+Outputs:
+
+```text
+data/processed/quantile_returns.parquet
+data/processed/long_short_returns.parquet
+data/processed/long_only_returns.parquet
+data/processed/backtest_summary.csv
+reports/figures/quantile_cumulative_returns.png
+```
+
+Each factor is split into Q1-Q5 by date. The backtest reports average forward
+label returns for each quantile, Q5-Q1 long-short returns, and Q5 long-only
+returns.
+
 ## Checks
 
 ```bash
