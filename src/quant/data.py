@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import akshare as ak
@@ -8,9 +9,11 @@ import yaml
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume", "amount", "turnover"]
 PANEL_INDEX = ["date", "ticker"]
 STOCK_ADJUST = "hfq"
+CDR_TICKERS = {"689009"}
 DOWNLOAD_LOG_NAME = "download.log"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 LOGGER = logging.getLogger(__name__)
+OHLCVFetcher = Callable[[str, str, str], pd.DataFrame]
 
 COLUMN_MAP = {
     "日期": "date",
@@ -68,16 +71,123 @@ def fetch_stock_ohlcv(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame:
+    failures: list[tuple[str, str]] = []
+    for source_name, fetcher in _stock_ohlcv_sources(ticker):
+        try:
+            frame = fetcher(ticker, start_date, end_date)
+        except Exception as exc:
+            failures.append((source_name, str(exc)))
+            LOGGER.warning(
+                "Stock OHLCV source %s failed for %s; trying fallback: %s",
+                source_name,
+                ticker,
+                exc,
+            )
+            continue
+
+        if not frame.empty:
+            if failures:
+                failed_sources = ", ".join(source for source, _ in failures)
+                LOGGER.info(
+                    "Downloaded stock OHLCV for %s from %s after fallback from %s",
+                    ticker,
+                    source_name,
+                    failed_sources,
+                )
+            return frame
+
+        failures.append((source_name, "empty frame"))
+        LOGGER.warning(
+            "Stock OHLCV source %s returned no rows for %s; trying fallback",
+            source_name,
+            ticker,
+        )
+
+    failure_details = "; ".join(
+        f"{source_name}: {message}" for source_name, message in failures
+    )
+    raise RuntimeError(
+        f"No OHLCV data downloaded for stock {ticker}. Tried "
+        f"{', '.join(source_name for source_name, _ in _stock_ohlcv_sources(ticker))}. "
+        f"{failure_details}",
+    )
+
+
+def _fetch_stock_ohlcv_eastmoney(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    raw = ak.stock_zh_a_hist(
+        symbol=ticker,
+        period="daily",
+        start_date=start_date,
+        end_date=end_date,
+        adjust=STOCK_ADJUST,
+    )
+    return _normalize_downloaded_ohlcv(
+        raw,
+        ticker,
+        start_date,
+        end_date,
+        volume_multiplier=100,
+    )
+
+
+def _fetch_stock_ohlcv_cdr(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    raw = ak.stock_zh_a_cdr_daily(
+        symbol=_stock_symbol(ticker),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return _normalize_downloaded_ohlcv(
+        raw,
+        ticker,
+        start_date,
+        end_date,
+        volume_multiplier=100,
+    )
+
+
+def _fetch_stock_ohlcv_sina(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
     raw = ak.stock_zh_a_daily(
         symbol=_stock_symbol(ticker),
         start_date=start_date,
         end_date=end_date,
         adjust=STOCK_ADJUST,
     )
+    return _normalize_downloaded_ohlcv(raw, ticker, start_date, end_date)
+
+
+def _stock_ohlcv_sources(ticker: str) -> list[tuple[str, OHLCVFetcher]]:
+    sources: list[tuple[str, OHLCVFetcher]] = [
+        ("stock_zh_a_hist", _fetch_stock_ohlcv_eastmoney),
+    ]
+    if ticker in CDR_TICKERS:
+        sources.append(("stock_zh_a_cdr_daily", _fetch_stock_ohlcv_cdr))
+    sources.append(("stock_zh_a_daily", _fetch_stock_ohlcv_sina))
+    return sources
+
+
+def _normalize_downloaded_ohlcv(
+    raw: pd.DataFrame,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    volume_multiplier: int = 1,
+) -> pd.DataFrame:
     frame = _filter_dates(normalize_ohlcv(raw, ticker=ticker), start_date, end_date)
-    if frame.empty:
-        raise RuntimeError(f"No OHLCV data downloaded for stock {ticker}.")
-    return frame
+    if volume_multiplier != 1:
+        frame["volume"] = frame["volume"] * volume_multiplier
+    return _drop_empty_ohlcv_rows(frame)
 
 
 def fetch_benchmark_ohlcv(
@@ -90,7 +200,9 @@ def fetch_benchmark_ohlcv(
         start_date=start_date,
         end_date=end_date,
     )
-    frame = _filter_dates(normalize_ohlcv(raw, ticker=symbol), start_date, end_date)
+    frame = _drop_empty_ohlcv_rows(
+        _filter_dates(normalize_ohlcv(raw, ticker=symbol), start_date, end_date),
+    )
     if frame.empty:
         raise RuntimeError(f"No OHLCV data downloaded for benchmark {symbol}.")
     return frame
@@ -110,7 +222,7 @@ def download_data(
         config = yaml.safe_load(file)
     data_config = config["data"]
     start_date = data_config["start_date"].replace("-", "")
-    end_date = (data_config["end_date"] or "20500101").replace("-", "")
+    end_date = _resolve_end_date(data_config["end_date"])
     benchmark = data_config["benchmark"]
     raw_dir = Path(data_config["raw_dir"])
     processed_dir = Path(data_config["processed_dir"])
@@ -134,21 +246,46 @@ def download_data(
     )
 
     tickers = universe["ticker"].tolist()
-    stock_frames = _fetch_many_stocks(tickers, start_date, end_date)
-    stock_panel = make_price_panel(stock_frames)
-    stock_panel_path = save_parquet(stock_panel, processed_dir / "stock_panel.parquet")
+    stock_panel_path = processed_dir / "stock_panel.parquet"
+    existing_stock_panel = load_existing_price_panel(stock_panel_path)
+    stock_frames = _fetch_many_stocks(
+        tickers,
+        start_date,
+        end_date,
+        existing_panel=existing_stock_panel,
+    )
+    stock_panel = _merge_price_panels(
+        existing_stock_panel,
+        stock_frames,
+        tickers,
+        start_date,
+        end_date,
+    )
+    stock_panel_path = save_parquet(stock_panel, stock_panel_path)
     LOGGER.info(
         "Saved stock OHLCV panel with %s rows to %s",
         len(stock_panel),
         stock_panel_path,
     )
 
-    benchmark_frame = fetch_benchmark_ohlcv(benchmark, start_date, end_date)
-    benchmark_panel = make_price_panel([benchmark_frame])
-    benchmark_path = save_parquet(
-        benchmark_panel,
-        processed_dir / f"benchmark_{benchmark}.parquet",
+    benchmark_path = processed_dir / f"benchmark_{benchmark}.parquet"
+    existing_benchmark_panel = load_existing_price_panel(benchmark_path)
+    benchmark_frames = _fetch_missing_ohlcv(
+        [benchmark],
+        start_date,
+        end_date,
+        existing_benchmark_panel,
+        fetch_benchmark_ohlcv,
+        "benchmark",
     )
+    benchmark_panel = _merge_price_panels(
+        existing_benchmark_panel,
+        benchmark_frames,
+        [benchmark],
+        start_date,
+        end_date,
+    )
+    benchmark_path = save_parquet(benchmark_panel, benchmark_path)
     LOGGER.info(
         "Saved benchmark OHLCV panel with %s rows to %s",
         len(benchmark_panel),
@@ -161,6 +298,15 @@ def download_data(
         "stock_panel": stock_panel_path,
         "benchmark": benchmark_path,
     }
+
+
+def load_existing_price_panel(path: str | Path) -> pd.DataFrame | None:
+    panel_path = Path(path)
+    if not panel_path.exists():
+        return None
+    panel = _coerce_price_panel(pd.read_parquet(panel_path))
+    LOGGER.info("Loaded existing OHLCV panel with %s rows from %s", len(panel), path)
+    return panel
 
 
 def configure_download_file_logging(raw_dir: str | Path) -> Path:
@@ -185,22 +331,56 @@ def _fetch_many_stocks(
     tickers: list[str],
     start_date: str,
     end_date: str,
+    existing_panel: pd.DataFrame | None = None,
 ) -> list[pd.DataFrame]:
+    return _fetch_missing_ohlcv(
+        tickers,
+        start_date,
+        end_date,
+        existing_panel,
+        fetch_stock_ohlcv,
+        "stock",
+    )
+
+
+def _fetch_missing_ohlcv(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+    existing_panel: pd.DataFrame | None,
+    fetcher: OHLCVFetcher,
+    label: str,
+) -> list[pd.DataFrame]:
+    requests = _missing_download_ranges(tickers, start_date, end_date, existing_panel)
+    if not requests:
+        LOGGER.info(
+            "%s OHLCV panel already covers %s ticker(s) from %s to %s",
+            label.capitalize(),
+            len(tickers),
+            start_date,
+            end_date,
+        )
+        return []
+
     frames: list[pd.DataFrame] = []
     failures: list[tuple[str, str]] = []
-    for position, ticker in enumerate(tickers, start=1):
+    for position, (ticker, request_start, request_end) in enumerate(requests, start=1):
         LOGGER.info(
-            "[%s/%s] Fetching stock OHLCV for %s",
+            "[%s/%s] Fetching %s OHLCV for %s from %s to %s",
             position,
-            len(tickers),
+            len(requests),
+            label,
             ticker,
+            request_start,
+            request_end,
         )
         try:
-            frame = fetch_stock_ohlcv(ticker, start_date, end_date)
+            frame = fetcher(ticker, request_start, request_end)
         except Exception as exc:
             failures.append((ticker, str(exc)))
             LOGGER.warning(
-                "Failed to download stock OHLCV for %s: %s",
+                "Failed to download %s OHLCV for %s: %s",
+                label,
                 ticker,
                 exc,
                 exc_info=True,
@@ -212,15 +392,144 @@ def _fetch_many_stocks(
     if failures:
         failed = ", ".join(ticker for ticker, _ in failures[:10])
         LOGGER.warning("Skipped %s failed ticker(s): %s", len(failures), failed)
-    if not frames:
-        raise RuntimeError("No stock OHLCV data was downloaded.")
+    if not frames and not _has_existing_price_data(
+        existing_panel,
+        tickers,
+        start_date,
+        end_date,
+    ):
+        raise RuntimeError(f"No {label} OHLCV data was downloaded.")
     return frames
+
+
+def _merge_price_panels(
+    existing_panel: pd.DataFrame | None,
+    downloaded_frames: list[pd.DataFrame],
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    existing = _filter_price_panel(existing_panel, tickers, start_date, end_date)
+    if not downloaded_frames:
+        if existing.empty:
+            raise RuntimeError("No OHLCV data is available for the requested range.")
+        return existing
+
+    downloaded = _coerce_price_panel(make_price_panel(downloaded_frames))
+    if existing.empty:
+        return _filter_price_panel(downloaded, tickers, start_date, end_date)
+
+    combined_index = existing.index.union(downloaded.index)
+    merged = downloaded.reindex(combined_index).combine_first(
+        existing.reindex(combined_index),
+    )
+    return _filter_price_panel(merged, tickers, start_date, end_date)
+
+
+def _missing_download_ranges(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+    existing_panel: pd.DataFrame | None,
+) -> list[tuple[str, str, str]]:
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+    if start > end:
+        return []
+
+    if existing_panel is None or existing_panel.empty:
+        return [(ticker, start_date, end_date) for ticker in tickers]
+
+    existing = _coerce_price_panel(existing_panel).reset_index()
+    existing = existing[
+        existing["ticker"].isin(tickers)
+        & (existing["date"] >= start)
+        & (existing["date"] <= end)
+    ]
+
+    requests: list[tuple[str, str, str]] = []
+    latest_by_ticker = existing.groupby("ticker")["date"].max()
+    for ticker in tickers:
+        if ticker not in latest_by_ticker:
+            requests.append((ticker, start_date, end_date))
+            continue
+
+        next_date = latest_by_ticker[ticker] + pd.Timedelta(days=1)
+        if next_date <= end:
+            requests.append((ticker, _format_ak_date(next_date), end_date))
+    return requests
+
+
+def _has_existing_price_data(
+    existing_panel: pd.DataFrame | None,
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+) -> bool:
+    return not _filter_price_panel(existing_panel, tickers, start_date, end_date).empty
+
+
+def _filter_price_panel(
+    panel: pd.DataFrame | None,
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    if panel is None or panel.empty:
+        return _empty_price_panel()
+
+    prices = _coerce_price_panel(panel).reset_index()
+    prices = prices[prices["ticker"].isin(tickers)]
+    prices = _filter_dates(prices, start_date, end_date)
+    return _coerce_price_panel(prices)
+
+
+def _coerce_price_panel(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return _empty_price_panel()
+
+    prices = frame.reset_index()
+    prices["date"] = pd.to_datetime(prices["date"])
+    prices["ticker"] = prices["ticker"].astype(str).str.zfill(6)
+    for column in OHLCV_COLUMNS:
+        if column not in prices.columns:
+            prices[column] = pd.NA
+        prices[column] = pd.to_numeric(prices[column], errors="coerce")
+
+    prices = _drop_empty_ohlcv_rows(prices[PANEL_INDEX + OHLCV_COLUMNS])
+    if prices.empty:
+        return _empty_price_panel()
+    return (
+        prices.groupby(PANEL_INDEX, as_index=False)
+        .last()
+        .set_index(PANEL_INDEX)
+        .sort_index()
+    )
+
+
+def _empty_price_panel() -> pd.DataFrame:
+    index = pd.MultiIndex.from_arrays([[], []], names=PANEL_INDEX)
+    return pd.DataFrame(columns=OHLCV_COLUMNS, index=index)
+
+
+def _drop_empty_ohlcv_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.dropna(subset=OHLCV_COLUMNS, how="all")
 
 
 def _filter_dates(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
     start = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date)
     return frame[(frame["date"] >= start) & (frame["date"] <= end)]
+
+
+def _resolve_end_date(end_date: str | None) -> str:
+    if end_date:
+        return end_date.replace("-", "")
+    return pd.Timestamp.today().strftime("%Y%m%d")
+
+
+def _format_ak_date(date: pd.Timestamp) -> str:
+    return date.strftime("%Y%m%d")
 
 
 def _stock_symbol(ticker: str) -> str:
