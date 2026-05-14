@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from quant.backtest import compute_quantile_backtest
 from quant.bootstrap import compute_bootstrap_ic
 from quant.costs import compute_cost_analysis
-from quant.data import download_data
 from quant.factors import compute_factors
+from quant.fetch import download_data
 from quant.labels import compute_labels
 from quant.metrics import compute_ic_analysis
 from quant.preprocess import preprocess_data

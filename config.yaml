@@ -2,7 +2,7 @@ project:
   name: qr-factor-lab
 
 data:
-  start_date: "20180101"
+  start_date: "2018-01-01"
   end_date: null
   universe: "CSI500"
   benchmark: "000905"
