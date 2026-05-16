@@ -12,7 +12,5 @@ data/processed/*
 data/cache/*
 !data/cache/.gitkeep
 
-reports/figures/*
-!reports/figures/.gitkeep
-
 /.vscode/
+*.md
