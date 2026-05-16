@@ -42,6 +42,8 @@ costs:
     - 30
 
 bootstrap:
-  n_samples: 1000
+  method: "circular_block"
+  n_bootstrap: 2000
   confidence_level: 0.95
+  block_length_multiplier: 2
   random_seed: 42

@@ -417,9 +417,22 @@ def _cost_table(cost_summary: pd.DataFrame) -> str:
 
 def _bootstrap_table(bootstrap_summary: pd.DataFrame) -> str:
     table = bootstrap_summary.sort_values(["factor_label", "metric"])
+    count_column = (
+        "n_obs" if "n_obs" in bootstrap_summary.columns else "n_observations"
+    )
+    if {"factor", "label"}.issubset(bootstrap_summary.columns):
+        columns = ["factor", "label", "metric", "mean"]
+    else:
+        columns = ["factor_label", "metric", "mean"]
+    if "bootstrap_std" in bootstrap_summary.columns:
+        columns.append("bootstrap_std")
+    columns.extend(["ci_lower", "ci_upper"])
+    if "block_length" in bootstrap_summary.columns:
+        columns.append("block_length")
+    columns.append(count_column)
     return _dataframe_table(
         table,
-        ["factor_label", "metric", "mean", "ci_lower", "ci_upper", "n_observations"],
+        columns,
         header_map={
             "factor_label": "因子-标签",
             "metric": "指标",
